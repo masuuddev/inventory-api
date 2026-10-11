@@ -1,6 +1,7 @@
 """Flask REST API for the inventory management system."""
 from flask import Flask, jsonify, request
 
+from . import off_client
 from .store import InventoryStore
 
 # Fields a client may set on an item.
@@ -72,6 +73,53 @@ def create_app(store=None):
         if item is None:
             return error("Item not found", 404)
         return jsonify({"message": "Item deleted", "item": item})
+
+    # ---- External API helper routes (OpenFoodFacts) ----
+
+    @app.get("/external/barcode/<barcode>")
+    def external_barcode(barcode):
+        try:
+            product = off_client.get_product_by_barcode(barcode)
+        except off_client.ExternalAPIError as exc:
+            return error(str(exc), 502)
+        if product is None:
+            return error("Product not found on OpenFoodFacts", 404)
+        return jsonify(product)
+
+    @app.get("/external/search")
+    def external_search():
+        name = (request.args.get("name") or "").strip()
+        if not name:
+            return error("Query parameter 'name' is required", 400)
+        try:
+            return jsonify(off_client.search_products(name))
+        except off_client.ExternalAPIError as exc:
+            return error(str(exc), 502)
+
+    @app.post("/inventory/import")
+    def import_item():
+        """Fetch a product from OpenFoodFacts (by barcode or name) and add it to inventory."""
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not (body.get("barcode") or body.get("name")):
+            return error("Provide 'barcode' or 'name'", 400)
+        _, err = validate_item(
+            {k: body[k] for k in ("price", "stock") if k in body}, partial=True
+        )
+        if err:
+            return error(err, 400)
+        try:
+            if body.get("barcode"):
+                product = off_client.get_product_by_barcode(str(body["barcode"]))
+            else:
+                found = off_client.search_products(body["name"], limit=1)
+                product = found[0] if found else None
+        except off_client.ExternalAPIError as exc:
+            return error(str(exc), 502)
+        if product is None:
+            return error("Product not found on OpenFoodFacts", 404)
+        product["price"] = body.get("price", 0)
+        product["stock"] = body.get("stock", 0)
+        return jsonify(app.store.add(product)), 201
 
     @app.errorhandler(404)
     def not_found(_):
