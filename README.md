@@ -115,3 +115,5 @@ the endpoints above for manual validation.
 Each feature was developed on its own branch (`feature/crud-api`,
 `feature/openfoodfacts`, `feature/cli`, `docs/readme`) and merged into `main`
 with `--no-ff` merge commits.
+
+Author: Masuud Adan
